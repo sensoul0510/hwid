@@ -1,42 +1,33 @@
-ARCH            = $(shell uname -m | sed s,i[3456789]86,ia32,)
+cmake_minimum_required(VERSION 3.16)
 
-OBJS            = main.o
-TARGET          = memory.efi
+set(CMAKE_CXX_COMPILER /usr/bin/g++)
+set(CMAKE_C_COMPILER /usr/bin/gcc)
 
-EFIINC          = /usr/include/efi
-EFIINCS         = -I$(EFIINC) -I$(EFIINC)/$(ARCH) -I$(EFIINC)/protocol
-LIB32           = /usr/lib32
-LIB64           = /usr/lib
+project(hwid)
 
-CFLAGS          = $(EFIINCS) -fno-stack-protector -fpic \
-		  -fshort-wchar -mno-red-zone -Wall
+set(EFIBIN "hwid.efi")
 
-ifeq ($(ARCH),x86_64)
-  CFLAGS += -DEFI_FUNCTION_WRAPPER
-  LIB           = $(LIB64)
-  EFILIB        = $(LIB64)
-endif
+include_directories(/usr/include/efi)
+include_directories(/usr/include/efi/x86_64)
+include_directories(/usr/include/efi/protocol)
 
-ifeq ($(ARCH),ia32)
-  LIB           = $(LIB32)
-  EFILIB        = $(LIB32)
-endif
+link_directories(/usr/lib)
 
-EFI_CRT_OBJS    = $(EFILIB)/crt0-efi-$(ARCH).o
-EFI_LDS         = $(EFILIB)/elf_$(ARCH)_efi.lds
+set(COMMONFLAGS "-DGNU_EFI_USE_MS_ABI -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -Wall -Werror")
+set(LDFLAGS "-Wl,-nostdlib -Wl,-znocombreloc -Wl,-T,/usr/lib/elf_x86_64_efi.lds -Wl,-shared -Wl,-Bsymbolic,/usr/lib/crt0-efi-x86_64.o -Wl,-lefi -Wl,-lgnuefi") 
 
-LDFLAGS         = -nostdlib -znocombreloc -T $(EFI_LDS) -shared \
-		  -Bsymbolic -L $(EFILIB) -L $(LIB) $(EFI_CRT_OBJS) 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++11 ${COMMONFLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --std=c11 ${COMMONFLAGS}")
 
-all: $(TARGET)
+file(GLOB_RECURSE sourcefiles
+    "*.h"
+    "*.c"
+)
 
-memory.so: $(OBJS)
-	ld $(LDFLAGS) $(OBJS) -o $@ -lefi -lgnuefi
+add_library(hwid SHARED ${sourcefiles})
+target_link_libraries(hwid ${LDFLAGS})
 
-%.efi: %.so
-	objcopy -j .text -j .sdata -j .data -j .dynamic \
-		-j .dynsym  -j .rel -j .rela -j .reloc \
-		--target=efi-rtdrv-$(ARCH) $^ $@
-
-clean:
-	rm -f memory.efi memory.so main.o *~
+add_custom_command(
+    TARGET hwid POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -j .text -j .sdata -j .data -j .dynamic -j .dynsym  -j .rel -j .rela -j .reloc --target=efi-app-x86_64 libhwid.so ${EFIBIN} # efi-rtdrv for runtime driver
+)
